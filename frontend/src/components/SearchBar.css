@@ -1,0 +1,60 @@
+/* ============================= */
+/* ðŸ«§ BUBBLY LETTER POP EFFECT  */
+/* ============================= */
+
+@keyframes bubblePop {
+  0% {
+    transform: scale(0.3) translateY(10px);
+    opacity: 0;
+  }
+
+  50% {
+    transform: scale(1.35) translateY(-6px);
+  }
+
+  70% {
+    transform: scale(0.9) translateY(2px);
+  }
+
+  100% {
+    transform: scale(1) translateY(0);
+    opacity: 1;
+  }
+}
+
+.pop-letter {
+  display: inline-block;
+  animation: bubblePop 0.35s ease;
+  margin-right: 1px;
+  pointer-events: none;
+}
+
+/* ============================= */
+/* âœ¨ CURSOR BLINK               */
+/* ============================= */
+
+@keyframes blink {
+  0%,50%,100% { opacity: 1; }
+  25%,75% { opacity: 0; }
+}
+
+.fake-cursor {
+  width: 2px;
+  height: 1.2em;
+  background: black;
+  margin-left: 2px;
+  animation: blink 1s infinite;
+}
+
+.dark .fake-cursor {
+  background: white;
+}
+
+/* ============================= */
+/* ðŸ’– SEARCH GLOW               */
+/* ============================= */
+
+.search-container:focus-within {
+  box-shadow: 0 0 25px rgba(236,72,153,0.4);
+  transform: scale(1.03);
+}
