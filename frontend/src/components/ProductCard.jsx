@@ -1,31 +1,25 @@
-import { Product } from '@/types/product';
+"use client";
 
-export default function ProductCard({
-  product,
-}: {
-  product: Product;
-}) {
+export default function ProductCard({ product }) {
   return (
-    <div className="border rounded-xl p-4 bg-white shadow-sm">
+    <div className="bg-white shadow-md rounded-xl p-4 hover:shadow-xl transition">
       <img
         src={product.image}
         alt={product.title}
-        className="h-40 w-full object-contain mb-3"
+        className="w-full h-48 object-contain mb-3"
       />
 
-      <h3 className="font-semibold text-sm mb-1 line-clamp-2">
+      <h3 className="font-semibold text-sm mb-2">
         {product.title}
       </h3>
 
-      <p className="text-lg font-bold">{product.displayPrice}</p>
-
-      <p className="text-sm text-gray-600">
-        ⭐ {product.rating} ({product.reviewCount} reviews)
+      <p className="text-yellow-500 text-sm mb-1">
+        ⭐ {product.rating}
       </p>
 
-      <button className="mt-3 w-full bg-black text-white py-2 rounded-lg">
-        View Deal
-      </button>
+      <p className="text-green-600 font-bold">
+        {product.displayPrice}
+      </p>
     </div>
   );
 }
