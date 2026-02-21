@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
-import { connectDB } from '@/lib/db';
 import Watchlist from '@/models/Watchlist';
+import { connectDB } from '@/lib/db';
 
 export async function POST(req: Request) {
-  const data = await req.json();
+  const body = await req.json();
   await connectDB();
 
-  await Watchlist.create(data);
+  const item = await Watchlist.create(body);
 
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true, item });
 }

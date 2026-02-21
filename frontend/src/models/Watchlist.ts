@@ -3,11 +3,13 @@ import mongoose from 'mongoose';
 const WatchlistSchema = new mongoose.Schema(
   {
     email: { type: String, required: true },
-    asin: String,
+    productId: { type: String, required: true }, // ASIN / SKU
     title: String,
     image: String,
     currentPrice: Number,
-    lastCheckedPrice: Number,
+    targetPrice: Number, // alert when price <= this
+    platform: String,
+    url: String,
   },
   { timestamps: true }
 );

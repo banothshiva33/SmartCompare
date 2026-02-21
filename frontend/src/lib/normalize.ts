@@ -10,5 +10,7 @@ export function normalizeAmazonItem(item: any): Product {
       item.Offers?.Listings?.[0]?.Price?.DisplayAmount || 'N/A',
     rating: Number(item.CustomerReviews?.StarRating || 0),
     reviewCount: Number(item.CustomerReviews?.Count || 0),
+    platform: 'Amazon',
+    url: `https://www.amazon.com/dp/${item.ASIN}`,
   };
 }
