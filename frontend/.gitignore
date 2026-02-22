@@ -20,9 +20,25 @@
 # production
 /build
 
-# misc
+# ========== Sensitive Files ==========
+# Secrets, keys, and credentials
 .DS_Store
 *.pem
+*.key
+*.cert
+*.keystore
+.ssh/
+secrets/
+
+# Database backups and dumps
+*.sql
+*.backup
+*.dump
+
+# API Keys and configs
+.apikey
+.credentials
+.vault
 
 # debug
 npm-debug.log*
@@ -30,8 +46,15 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+# ========== Environment & Secrets ==========
+# NEVER commit environment files with real credentials!
+.env
+.env.local
+.env.*.local
+.env.production
+.env.staging
+
+# ========== IDE & OS ==========
 
 # vercel
 .vercel

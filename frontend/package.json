@@ -6,12 +6,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "security-check": "npm audit --audit-level=moderate && npm outdated",
+    "security-fix": "npm audit fix"
   },
   "dependencies": {
     "@emailjs/browser": "^4.4.1",
     "axios": "^1.13.5",
-    "crypto-js": "^4.2.0",
     "lucide-react": "^0.575.0",
     "mongoose": "^9.2.1",
     "next": "16.1.6",

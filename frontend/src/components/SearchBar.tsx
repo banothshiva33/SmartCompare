@@ -2,6 +2,8 @@
 import { useEffect, useState } from 'react';
 import { Search, Upload, X } from 'lucide-react';
 import { Product } from '@/types/product';
+import { validateImageFile, validateSearchQuery } from '@/lib/validation';
+import { logSecurityEvent } from '@/lib/security';
 
 export default function SearchBar() {
   const [query, setQuery] = useState('');
@@ -11,45 +13,82 @@ export default function SearchBar() {
   const [error, setError] = useState('');
   const [searchMode, setSearchMode] = useState<'text' | 'image'>('text');
 
-  // Listen for category clicks
+  // ========== Security: Validate Search Results from Custom Events ==========
   useEffect(() => {
     const handler = (e: any) => {
-      setQuery(e.detail);
+      // ========== Security: Validate event detail to prevent XSS ==========
+      const detail = e.detail;
+      if (typeof detail !== 'string' || detail.length > 200) {
+        logSecurityEvent('invalid_event_data', { event: 'category-search' }, 'medium');
+        return;
+      }
+
+      setQuery(detail);
       setSearchMode('text');
       setImage(null);
       setImagePreview('');
     };
+
     window.addEventListener('category-search', handler);
     return () => window.removeEventListener('category-search', handler);
   }, []);
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      setImage(file);
-      setSearchMode('image');
-      
-      // Create preview
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setImagePreview(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+    if (!file) return;
+
+    // ========== Security: Validate image file before processing ==========
+    const validation = validateImageFile(file);
+    if (!validation.isValid) {
+      setError(validation.error || 'Invalid file');
+      return;
     }
+
+    setImage(file);
+    setSearchMode('image');
+    setError('');
+
+    // Create preview using secure FileReader API
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      // ========== Security: Ensure result is a valid data URL ==========
+      const result = reader.result as string;
+      if (result.startsWith('data:image/')) {
+        setImagePreview(result);
+      } else {
+        setError('Invalid image preview');
+        logSecurityEvent('invalid_image_preview', {}, 'low');
+      }
+    };
+    reader.onerror = () => {
+      setError('Failed to read file');
+      logSecurityEvent('file_read_error', {}, 'low');
+    };
+    reader.readAsDataURL(file);
   };
 
   const removeImage = () => {
     setImage(null);
     setImagePreview('');
     setSearchMode('text');
+    setError('');
   };
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
 
-    if (searchMode === 'text' && !query.trim()) {
-      setError('Please enter a search query');
-      return;
+    // ========== Security: Validate Search Input ==========
+    if (searchMode === 'text') {
+      const validation = validateSearchQuery(query);
+      if (!validation.isValid) {
+        setError(validation.error || 'Invalid search query');
+        return;
+      }
+      if (!validation.sanitized) {
+        setError('Search query is empty');
+        return;
+      }
     }
 
     if (searchMode === 'image' && !image) {
@@ -58,53 +97,67 @@ export default function SearchBar() {
     }
 
     setLoading(true);
-    setError('');
 
     try {
       const PAGE_SIZE = 24;
       const formData = new FormData();
 
       if (searchMode === 'text') {
-        formData.append('query', query);
+        // Use sanitized query from validation
+        const validation = validateSearchQuery(query);
+        formData.append('query', validation.sanitized || '');
         formData.append('searchType', 'text');
-      } else {
-        formData.append('image', image!);
+      } else if (searchMode === 'image' && image) {
+        formData.append('image', image);
         formData.append('searchType', 'image');
       }
+
       formData.append('page', '1');
       formData.append('pageSize', String(PAGE_SIZE));
+
+      // ========== Security: Use secure fetch with timeout ==========
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30000); // 30s timeout
 
       const response = await fetch('/api/search', {
         method: 'POST',
         body: formData,
+        signal: controller.signal,
       });
 
+      clearTimeout(timeout);
+
       if (!response.ok) {
-        throw new Error('Search failed');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP ${response.status}`);
       }
 
       const data = await response.json();
 
-      if (data.success && data.products) {
-        // Emit search results as a custom event with pagination metadata
-        window.dispatchEvent(
-          new CustomEvent('search-results', {
-            detail: {
-              products: data.products,
-              query: data.query || 'Image Search Results',
-              platforms: data.platforms,
-              page: data.page || 1,
-              pageSize: data.pageSize || PAGE_SIZE,
-              total: data.total || data.count || data.products.length,
-              searchType: searchMode,
-            },
-          })
-        );
-      } else {
-        setError('No results found');
+      // ========== Security: Validate response structure ==========
+      if (!Array.isArray(data.products)) {
+        throw new Error('Invalid response format');
       }
+
+      // ========== Security: Dispatch custom event with validated data ==========
+      // Event data is not user-controlled, only server response
+      window.dispatchEvent(
+        new CustomEvent('search-results', {
+          detail: {
+            products: data.products,
+            query: data.query || (searchMode === 'image' ? 'Image Search Results' : query),
+            platforms: data.platforms || [],
+            page: data.page || 1,
+            pageSize: data.pageSize || PAGE_SIZE,
+            total: data.total || data.count || data.products.length,
+            searchType: searchMode,
+          },
+        })
+      );
     } catch (err) {
-      setError((err as Error).message || 'Search failed');
+      const errorMsg = err instanceof Error ? err.message : 'Search failed';
+      setError(errorMsg);
+      logSecurityEvent('search_error', { error: errorMsg }, 'low');
       console.error('Search error:', err);
     } finally {
       setLoading(false);
@@ -121,6 +174,7 @@ export default function SearchBar() {
             setSearchMode('text');
             setImage(null);
             setImagePreview('');
+            setError('');
           }}
           className={`px-6 py-2 rounded-xl font-semibold transition ${
             searchMode === 'text'
@@ -154,11 +208,14 @@ export default function SearchBar() {
             }}
             placeholder="Search iPhone, laptop, headphones..."
             className="flex-1 border border-gray-300 dark:border-gray-700 p-4 rounded-xl text-gray-900 dark:text-white dark:bg-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            maxLength={200}
+            aria-label="Search products"
           />
           <button
             type="submit"
             disabled={loading}
             className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-8 py-4 rounded-xl font-semibold flex items-center gap-2 transition"
+            aria-label={loading ? 'Searching...' : 'Search'}
           >
             <Search size={20} />
             {loading ? 'Searching...' : 'Search'}
@@ -173,9 +230,10 @@ export default function SearchBar() {
             <label className="border-2 border-dashed border-blue-300 rounded-xl p-8 text-center cursor-pointer hover:border-blue-500 transition">
               <Input
                 type="file"
-                accept="image/*"
+                accept="image/jpeg,image/png,image/webp,image/gif"
                 onChange={handleImageSelect}
                 className="hidden"
+                aria-label="Upload product image"
               />
               <div className="flex flex-col items-center gap-2">
                 <Upload size={32} className="text-blue-600" />
@@ -183,22 +241,25 @@ export default function SearchBar() {
                   Click to upload image
                 </p>
                 <p className="text-xs text-gray-500">
-                  Take a photo or upload an image of the product
+                  Supported formats: JPEG, PNG, WebP, GIF (max 5MB)
                 </p>
               </div>
             </label>
           ) : (
             <div className="space-y-4">
               <div className="relative inline-block">
+                {/* ========== Security: Use img tag with proper attributes ==========  */}
                 <img
                   src={imagePreview}
                   alt="Preview"
                   className="rounded-xl max-h-48 max-w-full"
+                  loading="lazy"
                 />
                 <button
                   type="button"
                   onClick={removeImage}
                   className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full p-1 hover:bg-red-700"
+                  aria-label="Remove image"
                 >
                   <X size={16} />
                 </button>
@@ -207,6 +268,7 @@ export default function SearchBar() {
                 type="submit"
                 disabled={loading}
                 className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-8 py-4 rounded-xl font-semibold flex items-center justify-center gap-2 transition"
+                aria-label={loading ? 'Analyzing Image...' : 'Search by Image'}
               >
                 <Search size={20} />
                 {loading ? 'Analyzing Image...' : 'Search by Image'}
@@ -216,7 +278,11 @@ export default function SearchBar() {
         </div>
       )}
 
-      {error && <p className="text-red-600 text-sm mt-2">{error}</p>}
+      {error && (
+        <div className="text-red-600 text-sm mt-2" role="alert">
+          {error}
+        </div>
+      )}
     </form>
   );
 }

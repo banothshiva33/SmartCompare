@@ -7,21 +7,68 @@ import { generateAffiliateLink } from '@/lib/affiliate';
 import { savePriceHistory } from '@/lib/priceHistory';
 import { withCache, getCache } from '@/lib/cache';
 import { checkRateLimit } from '@/lib/rateLimit';
+import { validateSearchQuery, validateImageFile } from '@/lib/validation';
 
 export async function POST(req: Request) {
   try {
+    // ========== Security: Rate Limiting ==========
+    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 
+               req.headers.get('x-real-ip') || 
+               'unknown';
+    const rateLimitResult = checkRateLimit(`search:${ip}`, 30, 60);
+    if (!rateLimitResult.allowed) {
+      return NextResponse.json(
+        { error: 'Too many requests. Please try again later.' },
+        { 
+          status: 429,
+          headers: {
+            'Retry-After': '60',
+            'X-RateLimit-Reset': new Date(Date.now() + 60000).toISOString(),
+          }
+        }
+      );
+    }
+
     const formData = await req.formData();
     const searchType = formData.get('searchType') as string;
     let query = '';
 
+    // ========== Security: Input Validation ==========
+    if (!searchType || (searchType !== 'text' && searchType !== 'image')) {
+      return NextResponse.json(
+        { error: 'Invalid search type. Must be "text" or "image".' },
+        { status: 400 }
+      );
+    }
+
     // Determine search query
     if (searchType === 'text') {
-      query = formData.get('query') as string;
+      const rawQuery = formData.get('query') as string;
+      
+      // Validate search query
+      const validation = validateSearchQuery(rawQuery || '');
+      if (!validation.isValid) {
+        return NextResponse.json(
+          { error: validation.error },
+          { status: 400 }
+        );
+      }
+      query = validation.sanitized || '';
     } else if (searchType === 'image') {
       const imageFile = formData.get('image') as File;
+
       if (!imageFile) {
         return NextResponse.json(
-          { error: 'Image file is required' },
+          { error: 'Image file is required for image search' },
+          { status: 400 }
+        );
+      }
+
+      // ========== Security: File Validation ==========
+      const fileValidation = validateImageFile(imageFile);
+      if (!fileValidation.isValid) {
+        return NextResponse.json(
+          { error: fileValidation.error },
           { status: 400 }
         );
       }
@@ -31,9 +78,19 @@ export async function POST(req: Request) {
       const imageBuffer = Buffer.from(buffer);
 
       // Recognize product from image
-      console.log('🖼️  Analyzing image...');
+      console.log('🖼️ Analyzing image...');
       query = await recognizeProductFromImage(imageBuffer);
       console.log('✅ Image analysis result:', query);
+
+      // Validate the query generated from image
+      const queryValidation = validateSearchQuery(query);
+      if (!queryValidation.isValid) {
+        return NextResponse.json(
+          { error: 'Could not recognize product from image' },
+          { status: 400 }
+        );
+      }
+      query = queryValidation.sanitized || '';
     }
 
     if (!query || query.trim() === '') {
@@ -98,14 +155,16 @@ export async function POST(req: Request) {
       );
     });
 
-    // Pagination from form data (page, pageSize)
+    // ========== Security: Pagination Validation ==========
     const pageRaw = formData.get('page') as string | null;
     const pageSizeRaw = formData.get('pageSize') as string | null;
     let page = pageRaw ? parseInt(pageRaw, 10) : 1;
     let pageSize = pageSizeRaw ? parseInt(pageSizeRaw, 10) : 20;
+
+    // Validate pagination parameters
     if (!Number.isFinite(page) || page < 1) page = 1;
     if (!Number.isFinite(pageSize) || pageSize < 1) pageSize = 20;
-    const MAX_PAGE_SIZE = 100;
+    const MAX_PAGE_SIZE = 100; // Prevent abuse
     if (pageSize > MAX_PAGE_SIZE) pageSize = MAX_PAGE_SIZE;
 
     const total = allProducts.length;
@@ -124,22 +183,15 @@ export async function POST(req: Request) {
       const cacheKey = `search:${query}:page=${page}:size=${pageSize}`;
       const ttl = 60; // seconds
 
-        // try quick read from cache
-        const cached = await getCache(cacheKey);
-        if (cached) {
-          return NextResponse.json(cached);
-        }
-
-        // Rate limit per IP for search
-        const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || 'unknown';
-        const rl = checkRateLimit(`search:${ip}`, 30, 60);
-        if (!rl.allowed) {
-          return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 });
-        }
+      // Try quick read from cache
+      const cached = await getCache(cacheKey);
+      if (cached) {
+        return NextResponse.json(cached);
+      }
 
       const payload = {
         success: true,
-        query: isImage ? 'Image Search Results' : query,
+        query: query,
         products: paged,
         page,
         pageSize,
@@ -152,7 +204,8 @@ export async function POST(req: Request) {
       try {
         await withCache(cacheKey, ttl, async () => payload);
       } catch (e) {
-        // ignore cache errors
+        // Ignore cache errors - not critical
+        console.warn('Cache error (non-critical):', e);
       }
 
       return NextResponse.json(payload);
@@ -160,7 +213,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
-      query: isImage ? 'Image Search Results' : query,
+      query: 'Image Search Results',
       products: paged,
       page,
       pageSize,
@@ -170,11 +223,14 @@ export async function POST(req: Request) {
       imageSearch: isImage,
     });
   } catch (error) {
-    console.error('Search error:', error);
+    const err = error as Error;
+    console.error('Search error:', err.message);
+    
+    // ========== Security: Error Handling ==========
+    // Don't expose internal error details to client
     return NextResponse.json(
       {
-        error: 'Search failed',
-        details: (error as Error).message,
+        error: 'Search operation failed. Please try again later.',
       },
       { status: 500 }
     );
