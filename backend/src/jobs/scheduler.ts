@@ -23,7 +23,7 @@ export const schedulePriceAlerts = () => {
 
       for (const item of watchlistItems) {
         const product = item.productId as any;
-        const platformData = product.platforms.find((p) => p.platform === item.platform);
+        const platformData = product.platforms.find((p: any) => p.platform === item.platform);
 
         if (!platformData) continue;
 
