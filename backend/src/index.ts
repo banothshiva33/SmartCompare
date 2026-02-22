@@ -3,12 +3,14 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
 import pino from 'pino';
 import connectDB from './config/database';
 import { validateEnv } from './config/env';
 
 // Load environment variables
-dotenv.config();
+dotenv.config({ path: path.join(__dirname, '..', '.env.local') });
+dotenv.config({ path: path.join(__dirname, '...', '.env') });
 
 // Validate environment
 const envConfig = validateEnv();
