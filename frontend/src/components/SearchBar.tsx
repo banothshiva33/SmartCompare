@@ -61,8 +61,9 @@ export default function SearchBar() {
     setError('');
 
     try {
+      const PAGE_SIZE = 24;
       const formData = new FormData();
-      
+
       if (searchMode === 'text') {
         formData.append('query', query);
         formData.append('searchType', 'text');
@@ -70,6 +71,8 @@ export default function SearchBar() {
         formData.append('image', image!);
         formData.append('searchType', 'image');
       }
+      formData.append('page', '1');
+      formData.append('pageSize', String(PAGE_SIZE));
 
       const response = await fetch('/api/search', {
         method: 'POST',
@@ -83,13 +86,17 @@ export default function SearchBar() {
       const data = await response.json();
 
       if (data.success && data.products) {
-        // Emit search results as a custom event
+        // Emit search results as a custom event with pagination metadata
         window.dispatchEvent(
           new CustomEvent('search-results', {
             detail: {
               products: data.products,
               query: data.query || 'Image Search Results',
               platforms: data.platforms,
+              page: data.page || 1,
+              pageSize: data.pageSize || PAGE_SIZE,
+              total: data.total || data.count || data.products.length,
+              searchType: searchMode,
             },
           })
         );

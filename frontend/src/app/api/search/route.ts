@@ -5,6 +5,8 @@ import { normalizeAmazonItem } from '@/lib/normalize';
 import { recognizeProductFromImage } from '@/lib/detect';
 import { generateAffiliateLink } from '@/lib/affiliate';
 import { savePriceHistory } from '@/lib/priceHistory';
+import { withCache, getCache } from '@/lib/cache';
+import { checkRateLimit } from '@/lib/rateLimit';
 
 export async function POST(req: Request) {
   try {
@@ -96,17 +98,76 @@ export async function POST(req: Request) {
       );
     });
 
+    // Pagination from form data (page, pageSize)
+    const pageRaw = formData.get('page') as string | null;
+    const pageSizeRaw = formData.get('pageSize') as string | null;
+    let page = pageRaw ? parseInt(pageRaw, 10) : 1;
+    let pageSize = pageSizeRaw ? parseInt(pageSizeRaw, 10) : 20;
+    if (!Number.isFinite(page) || page < 1) page = 1;
+    if (!Number.isFinite(pageSize) || pageSize < 1) pageSize = 20;
+    const MAX_PAGE_SIZE = 100;
+    if (pageSize > MAX_PAGE_SIZE) pageSize = MAX_PAGE_SIZE;
+
+    const total = allProducts.length;
+    const start = (page - 1) * pageSize;
+    const end = Math.min(start + pageSize, total);
+    const paged = allProducts.slice(start, end);
+
     const uniquePlatforms = [
       ...new Set(allProducts.map((p) => p.platform)),
     ];
 
+    const isImage = String(searchType) === 'image';
+
+    // Only cache text searches (image searches contain binary/image-specific results)
+    if (!isImage) {
+      const cacheKey = `search:${query}:page=${page}:size=${pageSize}`;
+      const ttl = 60; // seconds
+
+        // try quick read from cache
+        const cached = await getCache(cacheKey);
+        if (cached) {
+          return NextResponse.json(cached);
+        }
+
+        // Rate limit per IP for search
+        const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || 'unknown';
+        const rl = checkRateLimit(`search:${ip}`, 30, 60);
+        if (!rl.allowed) {
+          return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 });
+        }
+
+      const payload = {
+        success: true,
+        query: isImage ? 'Image Search Results' : query,
+        products: paged,
+        page,
+        pageSize,
+        total,
+        count: paged.length,
+        platforms: uniquePlatforms,
+        imageSearch: isImage,
+      };
+
+      try {
+        await withCache(cacheKey, ttl, async () => payload);
+      } catch (e) {
+        // ignore cache errors
+      }
+
+      return NextResponse.json(payload);
+    }
+
     return NextResponse.json({
       success: true,
-      query: searchType === 'image' ? 'Image Search Results' : query,
-      products: allProducts,
-      count: allProducts.length,
+      query: isImage ? 'Image Search Results' : query,
+      products: paged,
+      page,
+      pageSize,
+      total,
+      count: paged.length,
       platforms: uniquePlatforms,
-      imageSearch: searchType === 'image',
+      imageSearch: isImage,
     });
   } catch (error) {
     console.error('Search error:', error);
