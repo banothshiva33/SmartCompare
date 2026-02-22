@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { ShoppingBag, Zap, Home, Couch } from 'lucide-react';
+import { ShoppingBag, Zap, Home, Armchair } from 'lucide-react';
 
 const categories = [
   {
@@ -22,7 +22,7 @@ const categories = [
   },
   {
     name: 'Home & Decor',
-    icon: Couch,
+    icon: Armchair,
     color: 'from-amber-400 to-amber-600',
     textColor: 'text-amber-600',
     bgColor: 'bg-amber-50',
